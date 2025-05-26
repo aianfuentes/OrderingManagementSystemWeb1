@@ -104,32 +104,32 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
     .shop-banner:hover {
         transform: scale(1.01);
     }
-    .shop-banner:hover .banner-bg {
+    .shop-banner .carousel-item {
+        height: 320px;
+    }
+    .shop-banner .carousel-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        filter: blur(2px) brightness(0.95);
+        transition: all 0.5s ease;
+    }
+    .shop-banner:hover .carousel-item img {
         transform: scale(1.05);
         filter: blur(1px) brightness(1);
     }
-    .shop-banner:hover .banner-content {
-        transform: translate(-50%, -52%);
-    }
-    .banner-bg {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: url('assets/images/products/shop-banner.png') center center/cover no-repeat;
-        filter: blur(2px) brightness(0.95);
-        z-index: 1;
-        transition: all 0.5s ease;
-    }
-    .banner-content {
-        position: absolute;
+    .shop-banner .carousel-caption {
         top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 100%;
+        transform: translateY(-50%);
+        bottom: auto;
         z-index: 2;
-        transition: all 0.3s ease;
+    }
+    .shop-banner .carousel-indicators {
+        z-index: 3;
+    }
+    .shop-banner .carousel-control-prev,
+    .shop-banner .carousel-control-next {
+        z-index: 3;
     }
     .shop-card { background: #fff; border-radius: 1.25rem; box-shadow: 0 4px 24px rgba(0,0,0,0.08); overflow: hidden; transition: box-shadow 0.2s, transform 0.2s; position: relative; }
     .shop-card-img { height: 220px; object-fit: cover; border-radius: 1.25rem 1.25rem 0 0; }
@@ -190,10 +190,43 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
 </header>
 <!-- Banner Section -->
 <div class="shop-banner position-relative mb-4">
-    <div class="banner-bg"></div>
-    <div class="banner-content position-absolute top-50 start-50 translate-middle text-center w-100" style="z-index:2;">
-        <h1 class="fw-bold text-dark mb-2" style="font-size:2.5rem;">Shop</h1>
-        <div class="text-dark-50">Home <i class="fas fa-chevron-right mx-1" style="font-size:0.9rem;"></i> Shop</div>
+    <div id="shopBannerCarousel" class="carousel slide" data-bs-ride="carousel">
+        <div class="carousel-indicators">
+            <button type="button" data-bs-target="#shopBannerCarousel" data-bs-slide-to="0" class="active" aria-current="true" aria-label="Slide 1"></button>
+            <button type="button" data-bs-target="#shopBannerCarousel" data-bs-slide-to="1" aria-label="Slide 2"></button>
+            <button type="button" data-bs-target="#shopBannerCarousel" data-bs-slide-to="2" aria-label="Slide 3"></button>
+        </div>
+        <div class="carousel-inner">
+            <div class="carousel-item active">
+                <img src="assets/images/products/shop-banner.png" class="d-block w-100" alt="Shop Banner 1">
+                <div class="carousel-caption">
+                    <h1 class="fw-bold text-dark mb-2" style="font-size:2.5rem;">Welcome to Our Shop</h1>
+                    <div class="text-dark-50">Home <i class="fas fa-chevron-right mx-1" style="font-size:0.9rem;"></i> Shop</div>
+                </div>
+            </div>
+            <div class="carousel-item">
+                <img src="assets/images/products/shop-banner2.png" class="d-block w-100" alt="Shop Banner 2">
+                <div class="carousel-caption">
+                    <h1 class="fw-bold text-dark mb-2" style="font-size:2.5rem;">Fresh Food Daily</h1>
+                    <div class="text-dark-50">Discover Our Menu</div>
+                </div>
+            </div>
+            <div class="carousel-item">
+                <img src="assets/images/products/shop-banner3.png" class="d-block w-100" alt="Shop Banner 3">
+                <div class="carousel-caption">
+                    <h1 class="fw-bold text-dark mb-2" style="font-size:2.5rem;">Fast Delivery</h1>
+                    <div class="text-dark-50">Order Now</div>
+                </div>
+            </div>
+        </div>
+        <button class="carousel-control-prev" type="button" data-bs-target="#shopBannerCarousel" data-bs-slide="prev">
+            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+            <span class="visually-hidden">Previous</span>
+        </button>
+        <button class="carousel-control-next" type="button" data-bs-target="#shopBannerCarousel" data-bs-slide="next">
+            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+            <span class="visually-hidden">Next</span>
+        </button>
     </div>
 </div>
 <!-- Filter/Sort Bar -->
