@@ -122,6 +122,7 @@ if (!empty($search)) {
                                     <thead>
                                         <tr>
                                             <th>ID</th>
+                                            <th>Image</th>
                                             <th>Name</th>
                                             <th>Description</th>
                                             <th>Price</th>
@@ -134,6 +135,17 @@ if (!empty($search)) {
                                         <?php foreach ($products as $product): ?>
                                         <tr>
                                             <td><?php echo $product['id']; ?></td>
+                                            <td>
+                                                <?php if (!empty($product['image']) && $product['image'] !== 'default.png'): ?>
+                                                <img src="assets/images/products/<?php echo htmlspecialchars($product['image']); ?>" 
+                                                     alt="<?php echo htmlspecialchars($product['name']); ?>"
+                                                     style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
+                                                <?php else: ?>
+                                                <div class="text-center" style="width: 50px; height: 50px; background: #f8f9fa; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                                    <i class="fas fa-image text-muted"></i>
+                                                </div>
+                                                <?php endif; ?>
+                                            </td>
                                             <td><?php echo htmlspecialchars($product['name']); ?></td>
                                             <td><?php echo htmlspecialchars($product['description']); ?></td>
                                             <td>$<?php echo number_format($product['price'], 2); ?></td>

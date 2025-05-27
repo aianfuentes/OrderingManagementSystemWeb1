@@ -21,8 +21,18 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'default';
 $view = isset($_GET['view']) ? $_GET['view'] : 'grid';
 $per_page = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 16;
 
+// Check for search query
+$search_query = $_GET['search'] ?? '';
+
 // Base query
 $query = "SELECT * FROM products WHERE stock > 0";
+$params = [];
+
+// Apply search filter if search query is present
+if (!empty($search_query)) {
+    $query .= " AND name LIKE ?";
+    $params[] = '%' . $search_query . '%';
+}
 
 // Apply sorting
 switch ($sort) {
@@ -40,12 +50,22 @@ switch ($sort) {
 }
 
 $stmt = $pdo->prepare($query);
-$stmt->execute();
+$stmt->execute($params);
 $products = $stmt->fetchAll();
+
+// Check if it's an AJAX request
+$is_ajax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // Apply items per page limit
 $products = array_slice($products, 0, $per_page);
-// Cart modal data
+
+// If it's an AJAX request, start output buffering before the product list HTML
+if ($is_ajax) {
+    ob_start();
+}
+
+// Cart modal data (only needed for non-AJAX requests)
+if (!$is_ajax) {
 $cart_items = [];
 $cart_total = 0;
 if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
@@ -65,9 +85,11 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
             'subtotal' => $subtotal
         ];
         $cart_total += $subtotal;
+        }
     }
 }
 ?>
+<?php if (!$is_ajax): // Only include full HTML structure for non-AJAX requests ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -81,28 +103,12 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
         margin: 0;
         padding: 0;
     }
-    .shop-header, .shop-banner {
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100vw;
-        max-width: 100vw;
-    }
-    body { background: #f7f8fa; }
-    .shop-header {
-        border-bottom: 1px solid #eee;
-        background: #f9fafc;
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
-    }
-    .shop-header .nav-link { font-size: 1.1rem; }
+    body { background: white; }
     .shop-banner {
         min-height: 320px;
         position: relative;
         overflow: hidden;
         transition: all 0.3s ease;
-    }
-    .shop-banner:hover {
-        transform: scale(1.01);
     }
     .shop-banner .carousel-item {
         height: 320px;
@@ -157,37 +163,7 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
     </style>
 </head>
 <body>
-<!-- Modern Shop Header -->
-<header class="shop-header bg-white shadow-sm d-flex align-items-center justify-content-between py-3" style="width:100vw;">
-    <div class="d-flex align-items-center gap-2 ps-4">
-        <img src="assets/images/products/test.png" alt="FoodExpress Logo" style="height:44px;width:44px;object-fit:contain;">
-        <span class="fw-bold fs-4" style="letter-spacing:1px;">Food Express</span>
-    </div>
-    <nav class="d-none d-md-flex gap-4 align-items-center">
-        <a href="homepage.php" class="nav-link text-dark fw-semibold position-relative">
-            Home
-            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.6rem;">
-                New
-            </span>
-        </a>
-        <a href="about.php" class="nav-link text-dark fw-semibold">About</a>
-        <a href="contact.php" class="nav-link text-dark fw-semibold">Contact</a>
-    </nav>
-    <div class="d-flex align-items-center gap-5 pe-4">
-        <div class="dropdown">
-            <a href="#" class="text-dark dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="fas fa-user"></i>
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-                <li><a class="dropdown-item" href="customer_dashboard.php"><i class="fas fa-tachometer-alt me-2"></i>My Dashboard</a></li>
-                <li><a class="dropdown-item" href="logout.php"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
-            </ul>
-        </div>
-        <a href="#" class="text-dark"><i class="fas fa-search"></i></a>
-        <a href="#" class="text-dark"><i class="far fa-heart"></i></a>
-        <a href="#" class="text-dark position-relative" data-bs-toggle="modal" data-bs-target="#cartModal"><i class="fas fa-shopping-cart"></i></a>
-    </div>
-</header>
+<?php include 'includes/header.php'; ?>
 <!-- Banner Section -->
 <div class="shop-banner position-relative mb-4">
     <div id="shopBannerCarousel" class="carousel slide" data-bs-ride="carousel">
@@ -249,6 +225,15 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
             <span class="divider"></span>
             <span class="ms-1 text-muted">Showing 1–<?php echo count($products); ?> of <?php echo count($products); ?> results</span>
         </div>
+        <!-- Search Bar -->
+        <form action="homepage.php" method="GET" class="d-flex">
+            <div class="input-group" style="width: 300px;">
+                <input type="text" class="form-control form-control-sm" placeholder="Search..." name="search">
+                <button class="btn btn-outline-secondary btn-sm" type="submit">
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+        </form>
         <div class="d-flex align-items-center gap-2">
             <span>Sort by</span>
             <select class="form-select form-select-sm" style="width:150px;" onchange="window.location.href=this.value">
@@ -302,19 +287,28 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
         </div>
     </div>
 </div>
+<?php endif; // End of non-AJAX full HTML structure ?>
 <!-- Product Grid/List -->
 <div class="container mb-5">
-    <div class="row g-4">
+    <div id="product-list" class="row g-4">
         <?php foreach ($products as $product): ?>
         <div class="col-12 <?php echo $view === 'grid' ? 'col-sm-6 col-md-4 col-lg-3' : 'col-12'; ?>">
             <?php if ($view === 'grid'): ?>
             <a href="product.php?id=<?php echo $product['id']; ?>" class="product-card-link text-decoration-none">
                 <div class="product-card-simple" style="background:#fff; border-radius:1.25rem; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden; transition:box-shadow 0.2s, transform 0.2s;">
-                    <img src="assets/images/products/<?php echo htmlspecialchars($product['image_path']); ?>" style="width:100%; height:220px; object-fit:cover; border-radius:1.25rem 1.25rem 0 0;">
+                    <?php if (!empty($product['image']) && $product['image'] !== 'default.png'): ?>
+                    <img src="assets/images/products/<?php echo htmlspecialchars($product['image']); ?>" 
+                         alt="<?php echo htmlspecialchars($product['name']); ?>"
+                         style="width:100%; height:220px; object-fit:cover; border-radius:1.25rem 1.25rem 0 0;">
+                    <?php else: ?>
+                    <div class="text-center p-4" style="width:100%; height:220px; display:flex; align-items:center; justify-content:center; background:#f8f9fa;">
+                        <i class="fas fa-image fa-3x text-muted"></i>
+                    </div>
+                    <?php endif; ?>
                     <div style="background:#f4f4f4; padding:1.5rem 1.2rem; text-align:left; border-radius:0 0 1.25rem 1.25rem;">
                         <div style="font-weight:700; font-size:1.3rem; color:#222; margin-bottom:0.3rem;"> <?php echo htmlspecialchars($product['name']); ?> </div>
                         <div style="color:#b0b0b0; font-size:1.05rem; font-weight:400; margin-bottom:0.7rem;"> <?php echo htmlspecialchars($product['description']); ?> </div>
-                        <div style="font-weight:700; font-size:1.25rem; color:#222;">₱ <?php echo number_format($product['price'], 0, ',', '.'); ?></div>
+                        <div style="font-weight:700; font-size:1.25rem; color:#222;">₱ <?php echo number_format($product['price'], 2, '.', ','); ?></div>
                     </div>
                 </div>
             </a>
@@ -322,14 +316,22 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
             <div class="card">
                 <div class="row g-0">
                     <div class="col-md-2">
-                        <img src="assets/images/products/<?php echo htmlspecialchars($product['image_path']); ?>" class="img-fluid rounded-start" style="height:100%; object-fit:cover;">
+                        <?php if (!empty($product['image']) && $product['image'] !== 'default.png'): ?>
+                        <img src="assets/images/products/<?php echo htmlspecialchars($product['image']); ?>" 
+                             alt="<?php echo htmlspecialchars($product['name']); ?>"
+                             class="img-fluid rounded-start" style="height:100%; object-fit:cover;">
+                        <?php else: ?>
+                        <div class="text-center p-4" style="height:100%; display:flex; align-items:center; justify-content:center; background:#f8f9fa;">
+                            <i class="fas fa-image fa-3x text-muted"></i>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-10">
                         <div class="card-body">
                             <h5 class="card-title"><?php echo htmlspecialchars($product['name']); ?></h5>
                             <p class="card-text"><?php echo htmlspecialchars($product['description']); ?></p>
                             <div class="d-flex justify-content-between align-items-center">
-                                <div class="fw-bold fs-4">₱ <?php echo number_format($product['price'], 0, ',', '.'); ?></div>
+                                <div class="fw-bold fs-4">₱ <?php echo number_format($product['price'], 2, '.', ','); ?></div>
                                 <a href="product.php?id=<?php echo $product['id']; ?>" class="btn btn-primary">View Details</a>
                             </div>
                         </div>
@@ -341,7 +343,37 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
         <?php endforeach; ?>
     </div>
 </div>
+<?php
+    // If it's an AJAX request, get the buffered content, clean the buffer, and exit
+    if ($is_ajax) {
+        echo ob_get_clean();
+        exit;
+    }
+?>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const searchInput = document.querySelector('input[name="search"]');
+    const productList = document.getElementById('product-list');
+
+    if (searchInput && productList) {
+        searchInput.addEventListener('input', function() {
+            const searchTerm = this.value;
+
+            fetch(`homepage.php?search=${encodeURIComponent(searchTerm)}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest' // Indicate AJAX request
+                }
+            })
+            .then(response => response.text())
+            .then(html => {
+                productList.innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Error fetching search results:', error);
+            });
+        });
+    }
+</script>
 <!-- Cart Modal -->
 <div class="modal fade" id="cartModal" tabindex="-1" aria-labelledby="cartModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -353,7 +385,7 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
       <div class="modal-body">
         <?php if (!empty($cart_items)): ?>
         <div class="table-responsive">
-          <table class="table align-middle">
+          <table class="table align-middle">x
             <thead>
               <tr>
                 <th>Product</th>
@@ -367,15 +399,15 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
               <tr>
                 <td><?php echo htmlspecialchars($item['name']); ?></td>
                 <td><?php echo $item['quantity']; ?></td>
-                <td>₱ <?php echo number_format($item['price'], 2); ?></td>
-                <td>₱ <?php echo number_format($item['subtotal'], 2); ?></td>
+                <td>₱ <?php echo number_format($item['price'], 2, '.', ','); ?></td>
+                <td>₱ <?php echo number_format($item['subtotal'], 2, '.', ','); ?></td>
               </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
         </div>
         <div class="d-flex justify-content-between align-items-center mt-3">
-          <div class="fw-bold fs-5">Total: ₱ <?php echo number_format($cart_total, 2); ?></div>
+          <div class="fw-bold fs-5">Total: ₱ <?php echo number_format($cart_total, 2, '.', ','); ?></div>
           <a href="checkout.php" class="btn btn-primary">Go to Checkout</a>
         </div>
         <?php else: ?>

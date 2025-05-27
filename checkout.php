@@ -13,6 +13,7 @@ if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
 }
 require_once 'includes/auth_check.php';
 require_once 'config/database.php';
+require_once 'includes/header.php'; // Include the header file
 
 // Handle order submission
 if (isset($_POST['place_order'])) {
@@ -84,100 +85,8 @@ foreach ($cart_products as $product) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-        }
-        .shop-header, .shop-banner {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100vw;
-            max-width: 100vw;
-        }
         body { background: #f7f8fa; }
-        .shop-header {
-            border-bottom: 1px solid #eee;
-            background: #f9fafc;
-            padding-top: 2rem !important;
-            padding-bottom: 2rem !important;
-        }
-        .shop-header .nav-link { font-size: 1.1rem; }
-        .shop-banner {
-            min-height: 320px;
-            position: relative;
-            overflow: hidden;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100vw;
-            max-width: 100vw;
-            transition: all 0.3s ease;
-        }
-        .shop-banner:hover {
-            transform: scale(1.01);
-        }
-        .shop-banner:hover .banner-bg {
-            transform: scale(1.05);
-            filter: blur(1px) brightness(1);
-        }
-        .shop-banner:hover .banner-content {
-            transform: translate(-50%, -52%);
-        }
-        .banner-bg {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: url('assets/images/products/shop-banner.png') center center/cover no-repeat;
-            filter: blur(2px) brightness(0.95);
-            z-index: 1;
-            transition: all 0.5s ease;
-        }
-        .banner-content {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100%;
-            z-index: 2;
-            transition: all 0.3s ease;
-        }
-        .banner-content img {
-            height: 40px;
-            margin-bottom: 0.5rem;
-        }
-        .banner-content h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #222;
-            margin-bottom: 0.5rem;
-        }
-        .banner-content .breadcrumb {
-            background: transparent;
-            padding: 0;
-            margin-bottom: 0;
-            font-size: 1.1rem;
-            color: #222;
-            justify-content: center;
-        }
-        .banner-content .breadcrumb-item.active {
-            color: #b0b0b0;
-        }
-        @media (max-width: 991.98px) {
-            .custom-header {
-                flex-direction: column;
-                gap: 1.2rem;
-                padding: 1rem 0 !important;
-            }
-            .custom-header .nav {
-                gap: 1.2rem;
-            }
-            .custom-header .header-icons {
-                gap: 1.2rem;
-            }
-            .shop-banner { min-height: 120px; }
-            .banner-content h1 { font-size: 2rem; }
-        }
+        /* Keep general styles, remove header/banner specific ones */
         .checkout-container { max-width: 1100px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); padding: 40px 30px; }
         .checkout-title { font-size: 2rem; font-weight: 700; margin-bottom: 2rem; }
         .form-label { font-weight: 600; }
@@ -195,33 +104,8 @@ foreach ($cart_products as $product) {
     </style>
 </head>
 <body>
-<!-- Modern Shop Header -->
-<header class="shop-header bg-white shadow-sm d-flex align-items-center justify-content-between py-3" style="width:100vw;">
-    <div class="d-flex align-items-center gap-2 ps-4">
-        <img src="assets/images/products/test.png" alt="FoodExpress Logo" style="height:44px;width:44px;object-fit:contain;">
-        <span class="fw-bold fs-4" style="letter-spacing:1px;">Food Express</span>
-    </div>
-    <nav class="d-none d-md-flex gap-4 align-items-center">
-        <a href="homepage.php" class="nav-link text-dark fw-semibold">Home</a>
-        <a href="about.php" class="nav-link text-dark fw-semibold">About</a>
-        <a href="contact.php" class="nav-link text-dark fw-semibold">Contact</a>
-    </nav>
-    <div class="d-flex align-items-center gap-5 pe-4">
-        <div class="dropdown">
-            <a href="#" class="text-dark dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="fas fa-user"></i>
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-                <li><a class="dropdown-item" href="customer_dashboard.php"><i class="fas fa-tachometer-alt me-2"></i>My Dashboard</a></li>
-                <li><a class="dropdown-item" href="logout.php"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
-            </ul>
-        </div>
-        <a href="#" class="text-dark"><i class="fas fa-search"></i></a>
-        <a href="#" class="text-dark"><i class="far fa-heart"></i></a>
-        <a href="#" class="text-dark position-relative" data-bs-toggle="modal" data-bs-target="#cartModal"><i class="fas fa-shopping-cart"></i></a>
-    </div>
-</header>
-<!-- Banner Section -->
+
+<!-- Banner Section (keep this as it seems specific to checkout page) -->
 <div class="shop-banner position-relative mb-4">
     <div class="banner-bg"></div>
     <div class="banner-content position-absolute top-50 start-50 translate-middle text-center w-100" style="z-index:2;">
@@ -330,6 +214,9 @@ foreach ($cart_products as $product) {
 </html>
 
 <style>
+/* Remove header specific styles that are now in header.php */
+/* Commenting out for safety, you can fully remove if confident */
+/*
 .hero-section {
     background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     color: white;
@@ -384,6 +271,7 @@ foreach ($cart_products as $product) {
         height: 150px;
     }
 }
+*/
 </style>
 
 <?php

@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     price DECIMAL(10,2) NOT NULL,
     stock INT NOT NULL DEFAULT 0,
+    category VARCHAR(50) DEFAULT 'Uncategorized',
+    image VARCHAR(255) DEFAULT 'default.png',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -45,4 +47,9 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 -- Insert default admin user (password: admin123)
 INSERT INTO users (name, email, password, role) VALUES 
-('Admin', 'admin@example.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'); 
+('Admin', 'admin@example.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin');
+
+-- Add category and image columns to products table
+ALTER TABLE products 
+ADD COLUMN category VARCHAR(50) DEFAULT 'Uncategorized',
+ADD COLUMN image VARCHAR(255) DEFAULT 'default.png'; 

@@ -142,38 +142,7 @@ require_once 'includes/auth_check.php';
     </style>
 </head>
 <body>
-    <!-- Header -->
-    <header class="shop-header bg-white shadow-sm d-flex align-items-center justify-content-between py-3" style="width:100vw;">
-        <div class="d-flex align-items-center gap-2 ps-4">
-            <img src="assets/images/products/test.png" alt="FoodExpress Logo" style="height:44px;width:44px;object-fit:contain;">
-            <span class="fw-bold fs-4" style="letter-spacing:1px;">Food Express</span>
-        </div>
-        <nav class="d-none d-md-flex gap-4 align-items-center">
-            <a href="homepage.php" class="nav-link text-dark fw-semibold">Home</a>
-            <a href="about.php" class="nav-link text-dark fw-semibold position-relative">
-                About
-                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.6rem;">
-                    New
-                </span>
-            </a>
-            <a href="contact.php" class="nav-link text-dark fw-semibold">Contact</a>
-        </nav>
-        <div class="d-flex align-items-center gap-5 pe-4">
-            <div class="dropdown">
-                <a href="#" class="text-dark dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="fas fa-user"></i>
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-                    <li><a class="dropdown-item" href="customer_dashboard.php"><i class="fas fa-tachometer-alt me-2"></i>My Dashboard</a></li>
-                    <li><a class="dropdown-item" href="logout.php"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
-                </ul>
-            </div>
-            <a href="#" class="text-dark"><i class="fas fa-search"></i></a>
-            <a href="#" class="text-dark"><i class="far fa-heart"></i></a>
-            <a href="#" class="text-dark position-relative" data-bs-toggle="modal" data-bs-target="#cartModal"><i class="fas fa-shopping-cart"></i></a>
-        </div>
-    </header>
-
+<?php include 'includes/header.php'; ?>
     <!-- Hero Section -->
     <section class="hero-section">
         <div class="container">
