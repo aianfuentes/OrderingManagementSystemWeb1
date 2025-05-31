@@ -12,12 +12,25 @@ if (!isset($_SESSION['is_admin']) || $_SESSION['is_admin'] !== true) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_status') {
     $order_id = $_POST['order_id'];
     $status = $_POST['status'];
-    
-    $stmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
-    $stmt->execute([$status, $order_id]);
-    
-    header('Location: manage_orders.php?success=Order status updated successfully');
-    exit();
+
+    // Validate status
+    $validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+    if (!in_array($status, $validStatuses)) {
+        header('Location: manage_orders.php?error=Invalid order status');
+        exit();
+    }
+
+    try {
+        // Update order status
+        $stmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
+        $stmt->execute([$status, $order_id]);
+
+        header('Location: manage_orders.php?success=Order status updated successfully');
+        exit();
+    } catch (Exception $e) {
+        header('Location: manage_orders.php?error=Failed to update order status: ' . urlencode($e->getMessage()));
+        exit();
+    }
 }
 
 // Get total count for pagination
@@ -48,9 +61,9 @@ $whereClause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
 // Get total count with filters
 $stmt = $pdo->prepare("
-    SELECT COUNT(*) 
-    FROM orders o 
-    JOIN users u ON o.user_id = u.id 
+    SELECT COUNT(*)
+    FROM orders o
+    JOIN users u ON o.user_id = u.id
     $whereClause
 ");
 $stmt->execute($params);
@@ -67,13 +80,13 @@ $stmt = $pdo->prepare("
     SELECT o.*, u.name as customer_name, u.email,
            GROUP_CONCAT(p.name SEPARATOR ', ') as items,
            GROUP_CONCAT(oi.quantity SEPARATOR ', ') as quantities
-    FROM orders o 
+    FROM orders o
     JOIN users u ON o.user_id = u.id
     LEFT JOIN order_items oi ON o.id = oi.order_id
     LEFT JOIN products p ON oi.product_id = p.id
     $whereClause
     GROUP BY o.id
-    ORDER BY o.created_at DESC 
+    ORDER BY o.created_at DESC
     LIMIT :limit OFFSET :offset
 ");
 
@@ -81,14 +94,15 @@ $stmt = $pdo->prepare("
 foreach ($params as $key => $value) {
     $stmt->bindValue($key + 1, $value);
 }
-$stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
-$stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $orders = $stmt->fetchAll();
 
 // Get order statuses for filter
-$statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+$statuses = ['pending', 'processing', 'completed', 'cancelled'];
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -105,7 +119,7 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
             --danger-color: #e74a3b;
             --warning-color: #f6c23e;
         }
-        
+
         body {
             background-color: #f8f9fc;
             min-height: 100vh;
@@ -215,7 +229,7 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                 <form method="GET" class="row g-3">
                     <div class="col-md-4">
                         <div class="input-group">
-                            <input type="text" class="form-control" name="search" placeholder="Search orders..." 
+                            <input type="text" class="form-control" name="search" placeholder="Search orders..."
                                    value="<?php echo htmlspecialchars($search); ?>">
                             <button class="btn btn-primary" type="submit">
                                 <i class="fas fa-search"></i>
@@ -262,7 +276,7 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                                 </td>
                                 <td>
                                     <small>
-                                        <?php 
+                                        <?php
                                         $items = explode(', ', $order['items']);
                                         $quantities = explode(', ', $order['quantities']);
                                         for($i = 0; $i < count($items); $i++) {
@@ -273,12 +287,14 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                                 </td>
                                 <td>₱<?php echo number_format($order['total_amount'], 2); ?></td>
                                 <td>
-                                    <span class="badge badge-<?php 
-                                        echo $order['status'] === 'delivered' ? 'success' : 
-                                            ($order['status'] === 'cancelled' ? 'danger' : 
-                                            ($order['status'] === 'pending' ? 'warning' : 'info')); 
+                                    <?php $status = strtolower($order['status']); ?>
+                                    <span class="badge bg-<?php
+                                        echo $status === 'completed' ? 'success' :
+                                        ($status === 'processing' ? 'info' :
+                                        ($status === 'cancelled' ? 'danger' :
+                                        ($status === 'pending' ? 'warning' : 'secondary')));
                                     ?>">
-                                        <?php echo ucfirst($order['status']); ?>
+                                        <?php echo ucfirst($status); ?>
                                     </span>
                                 </td>
                                 <td>
@@ -288,11 +304,11 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                                     </small>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-info btn-action" 
+                                    <button class="btn btn-sm btn-info btn-action"
                                             onclick="viewOrder(<?php echo htmlspecialchars(json_encode($order)); ?>)">
                                         <i class="fas fa-eye"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-primary btn-action" 
+                                    <button class="btn btn-sm btn-primary btn-action"
                                             onclick="updateStatus(<?php echo $order['id']; ?>, '<?php echo $order['status']; ?>')">
                                         <i class="fas fa-edit"></i>
                                     </button>
@@ -385,17 +401,18 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                     <h5 class="modal-title">Update Order Status</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form action="" method="POST">
+                <form action="manage_orders.php" method="POST">
                     <div class="modal-body">
                         <input type="hidden" name="action" value="update_status">
                         <input type="hidden" name="order_id" id="update_order_id">
-                        
+
                         <div class="mb-3">
                             <label class="form-label">Status</label>
                             <select class="form-select" name="status" id="update_status" required>
-                                <?php foreach ($statuses as $s): ?>
-                                <option value="<?php echo $s; ?>"><?php echo ucfirst($s); ?></option>
-                                <?php endforeach; ?>
+                                <option value="pending">Pending</option>
+                                <option value="processing">Processing</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
                             </select>
                         </div>
                     </div>
@@ -415,13 +432,14 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
             document.getElementById('view_order_date').textContent = new Date(order.created_at).toLocaleString();
             document.getElementById('view_customer_name').textContent = order.customer_name;
             document.getElementById('view_customer_email').textContent = order.email;
-            document.getElementById('view_status').innerHTML = '<span class="badge badge-' + 
-                (order.status === 'delivered' ? 'success' : 
-                 order.status === 'cancelled' ? 'danger' : 
-                 order.status === 'pending' ? 'warning' : 'info') + '">' +
+            document.getElementById('view_status').innerHTML = '<span class="badge bg-' +
+                (order.status === 'completed' ? 'success' :
+                 order.status === 'processing' ? 'info' :
+                 order.status === 'cancelled' ? 'danger' :
+                 order.status === 'pending' ? 'warning' : 'secondary') + '">' +
                 order.status.charAt(0).toUpperCase() + order.status.slice(1) + '</span>';
             document.getElementById('view_total').textContent = '₱' + parseFloat(order.total_amount).toFixed(2);
-            
+
             let itemsHtml = '';
             const items = order.items.split(', ');
             const quantities = order.quantities.split(', ');
@@ -429,10 +447,10 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
                 itemsHtml += items[i] + ' (x' + quantities[i] + ')<br>';
             }
             document.getElementById('view_items').innerHTML = itemsHtml;
-            
+
             new bootstrap.Modal(document.getElementById('viewOrderModal')).show();
         }
-        
+
         function updateStatus(orderId, currentStatus) {
             document.getElementById('update_order_id').value = orderId;
             document.getElementById('update_status').value = currentStatus;
@@ -440,4 +458,4 @@ $statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
         }
     </script>
 </body>
-</html> 
+</html>

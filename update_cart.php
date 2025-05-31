@@ -12,38 +12,48 @@ if (!isset($_SESSION['user_id'])) {
 
 $cartHandler = new CartHandler($pdo, $_SESSION['user_id']);
 
-// Get JSON data
-$data = json_decode(file_get_contents('php://input'), true);
-
-if (!isset($data['product_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Product ID is required']);
-    exit;
-}
-
-$product_id = (int)$data['product_id'];
-
-// Check if product exists and has stock
-$stmt = $pdo->prepare("SELECT stock FROM products WHERE id = ?");
-$stmt->execute([$product_id]);
-$product = $stmt->fetch();
-
-if (!$product) {
-    echo json_encode(['success' => false, 'message' => 'Product not found']);
-    exit;
+// Get data from either POST or JSON
+$data = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['cart_id'])) {
+        $data['cart_id'] = $_POST['cart_id'];
+    }
+    if (isset($_POST['quantity'])) {
+        $data['quantity'] = $_POST['quantity'];
+    }
+    if (isset($_POST['action'])) {
+        $data['action'] = $_POST['action'];
+    }
+} else {
+    $data = json_decode(file_get_contents('php://input'), true);
 }
 
 // Handle remove action
-if (isset($data['remove']) && $data['remove']) {
-    if ($cartHandler->removeFromCart($product_id)) {
-        echo json_encode(['success' => true]);
+if (isset($data['action']) && $data['action'] === 'remove') {
+    if (isset($data['cart_id'])) {
+        $stmt = $pdo->prepare("SELECT product_id FROM cart WHERE id = ? AND user_id = ?");
+        $stmt->execute([$data['cart_id'], $_SESSION['user_id']]);
+        $cart_item = $stmt->fetch();
+        
+        if ($cart_item && $cartHandler->removeFromCart($cart_item['product_id'])) {
+            echo json_encode([
+                'success' => true,
+                'cart_count' => $cartHandler->getCartCount(),
+                'cart_items' => $cartHandler->getCartItems(),
+                'cart_total' => $cartHandler->getCartTotal(),
+                'message' => 'Item removed from cart'
+            ]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Error removing item from cart']);
+        }
     } else {
-        echo json_encode(['success' => false, 'message' => 'Error removing item from cart']);
+        echo json_encode(['success' => false, 'message' => 'Cart item ID is required']);
     }
     exit;
 }
 
 // Handle quantity update
-if (isset($data['quantity'])) {
+if (isset($data['cart_id']) && isset($data['quantity'])) {
     $quantity = (int)$data['quantity'];
     
     if ($quantity <= 0) {
@@ -51,39 +61,32 @@ if (isset($data['quantity'])) {
         exit;
     }
     
-    if ($quantity > $product['stock']) {
+    $stmt = $pdo->prepare("SELECT c.*, p.stock FROM cart c JOIN products p ON c.product_id = p.id WHERE c.id = ? AND c.user_id = ?");
+    $stmt->execute([$data['cart_id'], $_SESSION['user_id']]);
+    $cart_item = $stmt->fetch();
+    
+    if (!$cart_item) {
+        echo json_encode(['success' => false, 'message' => 'Cart item not found']);
+        exit;
+    }
+    
+    if ($quantity > $cart_item['stock']) {
         echo json_encode(['success' => false, 'message' => 'Not enough stock available']);
         exit;
     }
     
-    if ($cartHandler->updateQuantity($product_id, $quantity)) {
-        echo json_encode(['success' => true]);
+    if ($cartHandler->updateQuantity($cart_item['product_id'], $quantity)) {
+        echo json_encode([
+            'success' => true,
+            'cart_count' => $cartHandler->getCartCount(),
+            'cart_items' => $cartHandler->getCartItems(),
+            'cart_total' => $cartHandler->getCartTotal(),
+            'message' => 'Cart updated successfully'
+        ]);
     } else {
         echo json_encode(['success' => false, 'message' => 'Error updating cart quantity']);
     }
     exit;
 }
 
-// Handle add to cart
-if (isset($data['add'])) {
-    $quantity = isset($data['quantity']) ? (int)$data['quantity'] : 1;
-    
-    if ($quantity <= 0) {
-        echo json_encode(['success' => false, 'message' => 'Quantity must be greater than 0']);
-        exit;
-    }
-    
-    if ($quantity > $product['stock']) {
-        echo json_encode(['success' => false, 'message' => 'Not enough stock available']);
-        exit;
-    }
-    
-    if ($cartHandler->addToCart($product_id, $quantity)) {
-        echo json_encode(['success' => true]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Error adding item to cart']);
-    }
-    exit;
-}
-
-echo json_encode(['success' => false, 'message' => 'Invalid action']); 
+echo json_encode(['success' => false, 'message' => 'Invalid request']); 

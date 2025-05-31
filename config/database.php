@@ -1,6 +1,6 @@
 <?php
 $host = 'localhost';
-$dbname = 'ordering_system';
+$dbname = 'ordering_system1';
 $username = 'root';
 $password = '';
 

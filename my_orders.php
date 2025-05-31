@@ -131,7 +131,7 @@ if (isset($_POST['cancel_order']) && isset($_POST['order_id'])) {
                                         </button>
                                     </td>
                                     <td>
-                                        <span class="font-weight-bold">$<?php echo number_format($order['total_amount'], 2); ?></span>
+                                        <span class="font-weight-bold">₱<?php echo number_format($order['total_amount'], 2); ?></span>
                                     </td>
                                     <td>
                                         <span class="badge badge-<?php 
@@ -199,7 +199,7 @@ if (isset($_POST['cancel_order']) && isset($_POST['order_id'])) {
                                                             <span class="info-box-icon bg-success"><i class="fas fa-dollar-sign"></i></span>
                                                             <div class="info-box-content">
                                                                 <span class="info-box-text">Total Amount</span>
-                                                                <span class="info-box-number">$<?php echo number_format($order['total_amount'], 2); ?></span>
+                                                                <span class="info-box-number">₱<?php echo number_format($order['total_amount'], 2); ?></span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -231,9 +231,9 @@ if (isset($_POST['cancel_order']) && isset($_POST['order_id'])) {
                                                                                 <small class="text-muted">Quantity: <?php echo $quantity; ?></small>
                                                                             </div>
                                                                             <div class="text-right">
-                                                                                <span class="text-muted">$<?php echo number_format($price, 2); ?> each</span>
+                                                                                <span class="text-muted">₱<?php echo number_format($price, 2); ?> each</span>
                                                                                 <br>
-                                                                                <strong>$<?php echo number_format($subtotal, 2); ?></strong>
+                                                                                <strong>₱<?php echo number_format($subtotal, 2); ?></strong>
                                                                             </div>
                                                                         </div>
                                                                     </li>

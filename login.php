@@ -56,8 +56,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } else {
                 // Hash password and create user
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, 'user')");
-                if ($stmt->execute([$first_name, $last_name, $email, $hashed_password])) {
+                $full_name = $first_name . ' ' . $last_name;
+                $stmt = $pdo->prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'user')");
+                if ($stmt->execute([$full_name, $email, $hashed_password])) {
                     $_SESSION['register_success'] = "Registration successful! You can now login.";
                     header("Location: " . $_SERVER['PHP_SELF']);
                     exit();

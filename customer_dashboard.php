@@ -16,6 +16,9 @@ if ($_SESSION['user_role'] === 'admin') {
 require_once 'includes/auth_check.php';
 require_once 'includes/customer_header.php';
 require_once 'config/database.php';
+require_once 'includes/loyalty_handler.php';
+require_once 'includes/wishlist_handler.php';
+require_once 'includes/order_tracking_handler.php';
 
 // Get customer's orders with product details
 $stmt = $pdo->prepare("
@@ -66,6 +69,20 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$_SESSION['user_id']]);
 $favorite_products = $stmt->fetchAll();
+
+// Get loyalty points and tier
+$loyalty_points = getLoyaltyPoints($_SESSION['user_id']);
+$loyalty_tier = getLoyaltyTier($loyalty_points);
+$loyalty_benefits = getLoyaltyBenefits($loyalty_tier);
+
+// Get wishlist items
+$wishlist_items = getWishlistItems($_SESSION['user_id']);
+
+// Get recent order tracking
+$tracking_updates = [];
+foreach ($recent_orders as $order) {
+    $tracking_updates[$order['id']] = getOrderProgress($order['id']);
+}
 ?>
 
 <!-- Content Wrapper. Contains page content -->
@@ -90,6 +107,36 @@ $favorite_products = $stmt->fetchAll();
     <!-- Main content -->
     <section class="content">
         <div class="container-fluid">
+            <!-- Loyalty Status -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4 text-center">
+                                    <h3>Loyalty Tier: <?php echo $loyalty_tier; ?></h3>
+                                    <div class="loyalty-badge">
+                                        <i class="fas fa-crown fa-3x text-warning"></i>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <h3>Points Balance</h3>
+                                    <h2 class="text-primary"><?php echo $loyalty_points; ?> points</h2>
+                                </div>
+                                <div class="col-md-4">
+                                    <h3>Your Benefits</h3>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-percentage"></i> <?php echo $loyalty_benefits['discount']; ?>% discount on all orders</li>
+                                        <li><i class="fas fa-shipping-fast"></i> <?php echo $loyalty_benefits['free_shipping'] ? 'Free Shipping' : 'Standard Shipping'; ?></li>
+                                        <li><i class="fas fa-star"></i> <?php echo $loyalty_benefits['points_multiplier']; ?>x points on all purchases</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Info boxes -->
             <div class="row">
                 <div class="col-12 col-sm-6 col-md-3">
@@ -106,7 +153,7 @@ $favorite_products = $stmt->fetchAll();
                         <span class="info-box-icon bg-success elevation-1"><i class="fas fa-dollar-sign"></i></span>
                         <div class="info-box-content">
                             <span class="info-box-text">Total Spent</span>
-                            <span class="info-box-number">$<?php echo number_format($total_spent, 2); ?></span>
+                            <span class="info-box-number">₱<?php echo number_format($total_spent, 2); ?></span>
                         </div>
                     </div>
                 </div>
@@ -151,12 +198,14 @@ $favorite_products = $stmt->fetchAll();
                                             <th>Products</th>
                                             <th>Amount</th>
                                             <th>Status</th>
-                                            <th>Date</th>
+                                            <th>Progress</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php foreach ($recent_orders as $order): ?>
+                                        <?php foreach ($recent_orders as $order): 
+                                            $tracking = $tracking_updates[$order['id']] ?? null;
+                                        ?>
                                         <tr>
                                             <td>#<?php echo $order['id']; ?></td>
                                             <td>
@@ -164,7 +213,7 @@ $favorite_products = $stmt->fetchAll();
                                                     <?php echo htmlspecialchars($order['product_names']); ?>
                                                 </small>
                                             </td>
-                                            <td>$<?php echo number_format($order['total_amount'], 2); ?></td>
+                                            <td>₱<?php echo number_format($order['total_amount'], 2); ?></td>
                                             <td>
                                                 <span class="badge badge-<?php 
                                                     echo $order['status'] == 'completed' ? 'success' : 
@@ -174,7 +223,17 @@ $favorite_products = $stmt->fetchAll();
                                                     <?php echo ucfirst($order['status']); ?>
                                                 </span>
                                             </td>
-                                            <td><?php echo date('M d, Y', strtotime($order['created_at'])); ?></td>
+                                            <td>
+                                                <?php if ($tracking): ?>
+                                                <div class="progress progress-sm">
+                                                    <div class="progress-bar bg-primary" role="progressbar" 
+                                                         style="width: <?php echo $tracking['progress']; ?>%"
+                                                         aria-valuenow="<?php echo $tracking['progress']; ?>" 
+                                                         aria-valuemin="0" aria-valuemax="100">
+                                                    </div>
+                                                </div>
+                                                <?php endif; ?>
+                                            </td>
                                             <td>
                                                 <a href="view_order.php?id=<?php echo $order['id']; ?>" class="btn btn-xs btn-info">
                                                     <i class="fas fa-eye"></i> View
@@ -189,11 +248,48 @@ $favorite_products = $stmt->fetchAll();
                     </div>
                 </div>
 
-                <!-- Favorite Products -->
+                <!-- Wishlist and Favorites -->
                 <div class="col-md-4">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title">My Favorite Products</h3>
+                            <h3 class="card-title">My Wishlist</h3>
+                            <div class="card-tools">
+                                <a href="wishlist.php" class="btn btn-tool">
+                                    <i class="fas fa-list"></i> View All
+                                </a>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Product</th>
+                                            <th>Price</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($wishlist_items as $item): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($item['name']); ?></td>
+                                            <td>₱<?php echo number_format($item['price'], 2); ?></td>
+                                            <td>
+                                                <a href="product.php?id=<?php echo $item['product_id']; ?>" class="btn btn-xs btn-primary">
+                                                    <i class="fas fa-shopping-cart"></i> Buy Now
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <h3 class="card-title">Favorite Products</h3>
                             <div class="card-tools">
                                 <a href="shop.php" class="btn btn-tool">
                                     <i class="fas fa-list"></i> View All Products

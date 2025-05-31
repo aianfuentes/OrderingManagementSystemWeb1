@@ -1,279 +1,305 @@
 <?php
-require_once 'includes/session_check.php';
-// Enable error reporting for debugging (remove in production)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+require_once 'config/database.php';
 
-// Friendly empty cart message instead of redirect
-if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
-    echo '<div class="container mt-5"><div class="alert alert-info">Your cart is empty. <a href="homepage.php">Go shopping</a>.</div></div>';
-    require_once 'includes/customer_footer.php';
+// Check if user is logged in
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
     exit();
 }
-require_once 'includes/auth_check.php';
-require_once 'config/database.php';
-require_once 'includes/header.php'; // Include the header file
 
-// Handle order submission
-if (isset($_POST['place_order'])) {
+// Get cart items
+$user_id = $_SESSION['user_id'];
+$stmt = $pdo->prepare("
+    SELECT c.*, p.name, p.price, p.image 
+    FROM cart c 
+    JOIN products p ON c.product_id = p.id 
+    WHERE c.user_id = ?
+");
+$stmt->execute([$user_id]);
+$cart_items = $stmt->fetchAll();
+
+// Calculate total
+$total = 0;
+foreach ($cart_items as $item) {
+    $total += $item['price'] * $item['quantity'];
+}
+
+// Get shipping addresses
+$stmt = $pdo->prepare("SELECT * FROM shipping_addresses WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$shipping_addresses = $stmt->fetchAll();
+
+// Get payment methods
+$stmt = $pdo->prepare("SELECT * FROM payment_methods WHERE is_active = 1");
+$stmt->execute();
+$payment_methods = $stmt->fetchAll();
+
+// Get user details
+$stmt = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+$stmt->execute([$user_id]);
+$user = $stmt->fetch();
+$first_name = $last_name = '';
+if ($user && strpos($user['name'], ' ') !== false) {
+    list($first_name, $last_name) = explode(' ', $user['name'], 2);
+} else if ($user) {
+    $first_name = $user['name'];
+}
+$email = $user['email'] ?? '';
+
+$phone = '';
+// Optionally, fetch phone from a user profile table if available
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // Get address fields from POST
+    $address_line1 = $_POST['address_line1'] ?? '';
+    $address_line2 = $_POST['address_line2'] ?? '';
+    $city = $_POST['city'] ?? '';
+    $state = $_POST['state'] ?? '';
+    $postal_code = $_POST['postal_code'] ?? '';
+    // $country = $_POST['country'] ?? ''; // if you still have this
+
+    // Combine into a single address string
+    $full_address = $address_line1;
+    if (!empty($address_line2)) $full_address .= ', ' . $address_line2;
+    $full_address .= ', ' . $city . ', ' . $state . ', ' . $postal_code;
+
+    // Use $full_address for saving to the order (e.g., in delivery_notes or a new column)
+    // Remove: $shipping_address_id = $_POST['shipping_address'];
+    // Remove: $delivery_notes = $_POST['delivery_notes'];
+
+    $payment_method_id = $_POST['payment_method'];
+    
+    // Start transaction
+    $pdo->beginTransaction();
+    
     try {
-        $pdo->beginTransaction();
         // Create order
         $stmt = $pdo->prepare("
-            INSERT INTO orders (user_id, total_amount, status, created_at) 
-            VALUES (?, ?, 'pending', NOW())
+            INSERT INTO orders (
+                user_id, 
+                total_amount, 
+                delivery_notes, 
+                payment_status
+            ) VALUES (?, ?, ?, 'pending')
         ");
-        $stmt->execute([$_SESSION['user_id'], $_POST['total_amount']]);
+        $stmt->execute([$user_id, $total, $full_address]);
         $order_id = $pdo->lastInsertId();
+        
         // Add order items
-        $stmt = $pdo->prepare("
-            INSERT INTO order_items (order_id, product_id, quantity, price) 
-            VALUES (?, ?, ?, ?)
-        ");
-        foreach ($_SESSION['cart'] as $product_id => $quantity) {
-            // Get product price and stock
-            $product_stmt = $pdo->prepare("SELECT price, stock, name FROM products WHERE id = ?");
-            $product_stmt->execute([$product_id]);
-            $product = $product_stmt->fetch();
-            // Double-check stock
-            if ($product['stock'] < $quantity) {
-                throw new Exception("Not enough stock for " . htmlspecialchars($product['name']));
-            }
-            $stmt->execute([$order_id, $product_id, $quantity, $product['price']]);
+        foreach ($cart_items as $item) {
+            $stmt = $pdo->prepare("
+                INSERT INTO order_items (
+                    order_id, 
+                    product_id, 
+                    quantity, 
+                    price
+                ) VALUES (?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $order_id, 
+                $item['product_id'], 
+                $item['quantity'], 
+                $item['price']
+            ]);
+            
             // Update product stock
-            $update_stmt = $pdo->prepare("UPDATE products SET stock = stock - ? WHERE id = ?");
-            $update_stmt->execute([$quantity, $product_id]);
+            $stmt = $pdo->prepare("
+                UPDATE products 
+                SET stock = stock - ? 
+                WHERE id = ?
+            ");
+            $stmt->execute([$item['quantity'], $item['product_id']]);
         }
+        
+        // Create payment transaction
+        $stmt = $pdo->prepare("
+            INSERT INTO payment_transactions (
+                order_id, 
+                payment_method_id, 
+                amount, 
+                status
+            ) VALUES (?, ?, ?, 'pending')
+        ");
+        $stmt->execute([$order_id, $payment_method_id, $total]);
+        
+        // Clear cart
+        $stmt = $pdo->prepare("DELETE FROM cart WHERE user_id = ?");
+        $stmt->execute([$user_id]);
+        
         $pdo->commit();
-        unset($_SESSION['cart']); // Only clear cart after successful order
-        header("Location: order_confirmation.php?id=" . $order_id);
+        
+        // Redirect to payment processing page
+        header("Location: process_payment.php?order_id=" . $order_id);
         exit();
+        
     } catch (Exception $e) {
         $pdo->rollBack();
-        $error = "Failed to place order: " . $e->getMessage();
+        $error = "Failed to process order. Please try again.";
     }
 }
-// Get cart items
-$cart_items = [];
-$cart_total = 0;
-$product_ids = array_keys($_SESSION['cart']);
-$placeholders = str_repeat('?,', count($product_ids) - 1) . '?';
-$stmt = $pdo->prepare("SELECT * FROM products WHERE id IN ($placeholders)");
-$stmt->execute($product_ids);
-$cart_products = $stmt->fetchAll();
-foreach ($cart_products as $product) {
-    $quantity = $_SESSION['cart'][$product['id']];
-    $subtotal = $product['price'] * $quantity;
-    $cart_items[] = [
-        'id' => $product['id'],
-        'name' => $product['name'],
-        'price' => $product['price'],
-        'quantity' => $quantity,
-        'subtotal' => $subtotal
-    ];
-    $cart_total += $subtotal;
-}
+
+require_once 'includes/header.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout - Ordering Management System</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    <style>
-        body { background: #f7f8fa; }
-        /* Keep general styles, remove header/banner specific ones */
-        .checkout-container { max-width: 1100px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px rgba(0,0,0,0.04); padding: 40px 30px; }
-        .checkout-title { font-size: 2rem; font-weight: 700; margin-bottom: 2rem; }
-        .form-label { font-weight: 600; }
-        .order-summary { background: #fafbfc; border-radius: 12px; padding: 32px 24px; }
-        .order-summary h5 { font-weight: 700; margin-bottom: 1.5rem; }
-        .order-summary .summary-row { display: flex; justify-content: space-between; margin-bottom: 0.7rem; }
-        .order-summary .summary-total { color: #e3a800; font-size: 1.3rem; font-weight: 700; }
-        .order-summary .product-title { font-weight: 600; }
-        .order-summary .product-qty { color: #888; font-size: 0.95rem; }
-        .order-summary .payment-option { margin-bottom: 1rem; }
-        .order-summary .payment-option label { font-weight: 500; margin-left: 0.5rem; }
-        .order-summary .policy { font-size: 0.95rem; color: #888; margin-top: 1.5rem; }
-        .order-summary .policy b { color: #222; }
-        .order-summary .btn { font-size: 1.1rem; border-radius: 2rem; padding: 0.7rem 2.5rem; margin-top: 1.5rem; }
-    </style>
-</head>
-<body>
-
-<!-- Banner Section (keep this as it seems specific to checkout page) -->
-<div class="shop-banner position-relative mb-4">
-    <div class="banner-bg"></div>
-    <div class="banner-content position-absolute top-50 start-50 translate-middle text-center w-100" style="z-index:2;">
-        <h1 class="fw-bold text-dark mb-2" style="font-size:2.5rem;">Checkout</h1>
-        <div class="text-dark-50">Home <i class="fas fa-chevron-right mx-1" style="font-size:0.9rem;"></i> Checkout</div>
-    </div>
-</div>
-<div class="container mb-5">
-    <div class="checkout-container row g-0" style="background:#fff;box-shadow:0 2px 16px rgba(0,0,0,0.04);border-radius:16px;padding:40px 30px;">
-        <!-- Billing Details -->
-        <div class="col-md-6 pe-md-5 mb-4 mb-md-0">
-            <div class="checkout-title">Billing details</div>
-            <?php if (isset($error)): ?>
-                <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
-            <?php endif; ?>
-            <form method="POST">
-                <div class="row mb-3">
-                    <div class="col">
-                        <label class="form-label">First Name</label>
-                        <input type="text" class="form-control" required>
+<!-- Content Wrapper. Contains page content -->
+<div class="content-wrapper">
+    <!-- Content Header (Page header) -->
+    <div class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1 class="m-0">Checkout</h1>
                 </div>
-                    <div class="col">
-                        <label class="form-label">Last Name</label>
-                        <input type="text" class="form-control" required>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="homepage.php">Home</a></li>
+                        <li class="breadcrumb-item active">Checkout</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main content -->
+    <section class="content">
+        <div class="container-fluid">
+            <?php if (isset($error)): ?>
+            <div class="alert alert-danger">
+                <?php echo $error; ?>
+            </div>
+            <?php endif; ?>
+
+            <div class="row">
+                <!-- Order Summary -->
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Order Summary</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Product</th>
+                                            <th>Price</th>
+                                            <th>Quantity</th>
+                                            <th>Subtotal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($cart_items as $item): ?>
+                                        <tr>
+                                            <td>
+                                                <img src="assets/images/products/<?php echo htmlspecialchars($item['image']); ?>" 
+                                                     alt="<?php echo htmlspecialchars($item['name']); ?>" 
+                                                     style="width: 50px; height: 50px; object-fit: cover;">
+                                                <?php echo htmlspecialchars($item['name']); ?>
+                                            </td>
+                                            <td>₱<?php echo number_format($item['price'], 2); ?></td>
+                                            <td><?php echo $item['quantity']; ?></td>
+                                            <td>₱<?php echo number_format($item['price'] * $item['quantity'], 2); ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <td colspan="3" class="text-right"><strong>Total:</strong></td>
+                                            <td><strong>₱<?php echo number_format($total, 2); ?></strong></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Company Name (Optional)</label>
-                    <input type="text" class="form-control">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Country / Region</label>
-                    <select class="form-select">
-                        <option selected>Sri Lanka</option>
-                        <option>Philippines</option>
-                        <option>United States</option>
-                        <option>Other</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Street address</label>
-                    <input type="text" class="form-control" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Town / City</label>
-                    <input type="text" class="form-control" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Province</label>
-                    <select class="form-select">
-                        <option selected>Western Province</option>
-                        <option>Central Province</option>
-                        <option>Other</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">ZIP code</label>
-                    <input type="text" class="form-control" required>
-            </div>
-            </form>
-        </div>
-        <!-- Order Summary -->
-        <div class="col-md-6">
-            <div class="order-summary">
-                <h5>Product <span class="float-end">Subtotal</span></h5>
-                <?php foreach ($cart_items as $item): ?>
-                <div class="summary-row">
-                    <span class="product-title"><?php echo htmlspecialchars($item['name']); ?> <span class="product-qty">× <?php echo $item['quantity']; ?></span></span>
-                    <span>₱ <?php echo number_format($item['subtotal'], 2); ?></span>
-                </div>
-                <?php endforeach; ?>
-                <div class="summary-row">
-                    <span>Subtotal</span>
-                    <span>₱ <?php echo number_format($cart_total, 2); ?></span>
-                                </div>
-                <div class="summary-row mb-3">
-                    <span>Total</span>
-                    <span class="summary-total">₱ <?php echo number_format($cart_total, 2); ?></span>
-                                </div>
-                <hr>
-                <div class="payment-option">
-                    <input type="radio" id="bank" name="payment" checked>
-                    <label for="bank">Direct Bank Transfer</label>
-                    <div class="text-muted ms-4" style="font-size:0.95rem;">Make your payment directly into our bank account. Please use your Order ID as the payment reference. Your order will not be shipped until the funds have cleared in our account.</div>
+
+                <!-- Checkout Form -->
+                <div class="col-md-4">
+                    <form method="POST" action="">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Customer Details</h3>
                             </div>
-                <div class="payment-option">
-                    <input type="radio" id="bank2" name="payment" disabled>
-                    <label for="bank2">Direct Bank Transfer</label>
+                            <div class="card-body">
+                                <h5>Customer Details</h5>
+                                <div class="form-group">
+                                    <label>First Name</label>
+                                    <input type="text" name="first_name" class="form-control" value="<?php echo htmlspecialchars($first_name); ?>" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Last Name</label>
+                                    <input type="text" name="last_name" class="form-control" value="<?php echo htmlspecialchars($last_name); ?>" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Email Address</label>
+                                    <input type="email" name="email" class="form-control" value="<?php echo htmlspecialchars($email); ?>" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Phone Number</label>
+                                    <input type="text" name="phone" class="form-control" value="<?php echo htmlspecialchars($phone); ?>">
+                                </div>
+                                <hr>
+                                <h5>Delivery Address</h5>
+                                <div class="form-group">
+                                    <label>Street Address</label>
+                                    <input type="text" name="address_line1" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Apartment/Unit</label>
+                                    <input type="text" name="address_line2" class="form-control">
+                                </div>
+                                <div class="form-group">
+                                    <label>City</label>
+                                    <input type="text" name="city" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>State/Province</label>
+                                    <input type="text" name="state" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Postal Code</label>
+                                    <input type="text" name="postal_code" class="form-control" required>
+                                </div>
+                            </div>
                         </div>
-                <div class="payment-option">
-                    <input type="radio" id="cod" name="payment">
-                    <label for="cod">Cash On Delivery</label>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Payment Method</h3>
+                            </div>
+                            <div class="card-body">
+                                <?php foreach ($payment_methods as $method): ?>
+                                <div class="form-check mb-3">
+                                    <input type="radio" 
+                                           name="payment_method" 
+                                           value="<?php echo $method['id']; ?>" 
+                                           class="form-check-input" 
+                                           required>
+                                    <label class="form-check-label">
+                                        <?php echo htmlspecialchars($method['name']); ?>
+                                        <small class="d-block text-muted">
+                                            <?php echo htmlspecialchars($method['description']); ?>
+                                        </small>
+                                    </label>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
-                <div class="policy">
-                    Your personal data will be used to support your experience throughout this website, to manage access to your account, and for other purposes described in our <b>privacy policy</b>.
+
+                        <div class="card">
+                            <div class="card-body">
+                                <button type="submit" class="btn btn-primary btn-block btn-lg">
+                                    Proceed to Payment
+                                </button>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-                <form method="POST">
-                    <input type="hidden" name="total_amount" value="<?php echo $cart_total; ?>">
-                    <button type="submit" name="place_order" class="btn btn-outline-dark w-100 mt-4">Place order</button>
-                </form>
             </div>
         </div>
-    </div>
+    </section>
 </div>
-</body>
-</html>
 
-<style>
-/* Remove header specific styles that are now in header.php */
-/* Commenting out for safety, you can fully remove if confident */
-/*
-.hero-section {
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
-    padding: 4rem 0;
-    margin-top: -2rem;
-    margin-bottom: 2rem;
-}
-
-.hero-section h1 {
-    font-size: 2.5rem;
-    margin-bottom: 1.5rem;
-}
-
-.hero-section p {
-    font-size: 1.2rem;
-    opacity: 0.9;
-}
-
-.product-image {
-    height: 200px;
-    overflow: hidden;
-    border-radius: 8px;
-}
-
-.product-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.payment-methods {
-    background-color: #f8f9fa;
-    padding: 1rem;
-    border-radius: 8px;
-}
-
-.custom-control-label {
-    cursor: pointer;
-}
-
-@media (max-width: 768px) {
-    .hero-section {
-        padding: 2rem 0;
-        text-align: center;
-    }
-    
-    .hero-section h1 {
-        font-size: 2rem;
-    }
-    
-    .product-image {
-        height: 150px;
-    }
-}
-*/
-</style>
-
-<?php
-require_once 'includes/customer_footer.php';
-?> 
+<?php require_once 'includes/footer.php'; ?> 

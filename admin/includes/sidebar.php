@@ -186,6 +186,12 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 <span>Reports</span>
             </a>
         </div>
+        <div class="nav-item">
+            <a href="stock_management.php" class="nav-link <?php echo $current_page === 'stock_management.php' ? 'active' : ''; ?>">
+                <i class="fas fa-boxes"></i>
+                <span>Stock Management</span>
+            </a>
+        </div>
     </nav>
 
     <div class="sidebar-footer">

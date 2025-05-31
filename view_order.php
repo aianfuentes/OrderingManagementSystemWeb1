@@ -97,7 +97,7 @@ $order_items = $stmt->fetchAll();
                                 </tr>
                                 <tr>
                                     <th>Total Amount:</th>
-                                    <td>$<?php echo number_format($order['total_amount'], 2); ?></td>
+                                    <td>₱<?php echo number_format($order['total_amount'], 2); ?></td>
                                 </tr>
                             </table>
                         </div>
@@ -124,16 +124,16 @@ $order_items = $stmt->fetchAll();
                                         <?php foreach ($order_items as $item): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($item['product_name']); ?></td>
-                                            <td>$<?php echo number_format($item['price'], 2); ?></td>
+                                            <td>₱<?php echo number_format($item['price'], 2); ?></td>
                                             <td><?php echo $item['quantity']; ?></td>
-                                            <td>$<?php echo number_format($item['price'] * $item['quantity'], 2); ?></td>
+                                            <td>₱<?php echo number_format($item['price'] * $item['quantity'], 2); ?></td>
                                         </tr>
                                         <?php endforeach; ?>
                                     </tbody>
                                     <tfoot>
                                         <tr>
                                             <th colspan="3" class="text-right">Total:</th>
-                                            <th>$<?php echo number_format($order['total_amount'], 2); ?></th>
+                                            <th>₱<?php echo number_format($order['total_amount'], 2); ?></th>
                                         </tr>
                                     </tfoot>
                                 </table>

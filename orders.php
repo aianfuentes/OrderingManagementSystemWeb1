@@ -168,18 +168,11 @@ if (!empty($search)) {
                                         <tr>
                                             <td>#<?php echo $order['id']; ?></td>
                                             <td><?php echo htmlspecialchars($order['customer_name']); ?></td>
-                                            <td>$<?php echo number_format($order['total_amount'], 2); ?></td>
+                                            <td>₱<?php echo number_format($order['total_amount'], 2); ?></td>
                                             <td>
-                                                <form method="POST" class="d-inline">
-                                                    <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
-                                                    <select name="status" class="form-control form-control-sm" onchange="this.form.submit()">
-                                                        <option value="pending" <?php echo $order['status'] == 'pending' ? 'selected' : ''; ?>>Pending</option>
-                                                        <option value="processing" <?php echo $order['status'] == 'processing' ? 'selected' : ''; ?>>Processing</option>
-                                                        <option value="completed" <?php echo $order['status'] == 'completed' ? 'selected' : ''; ?>>Completed</option>
-                                                        <option value="cancelled" <?php echo $order['status'] == 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                                                    </select>
-                                                    <input type="hidden" name="update_status" value="1">
-                                                </form>
+                                                <span class="badge bg-<?php echo $order['status'] == 'completed' ? 'success' : ($order['status'] == 'processing' ? 'warning' : ($order['status'] == 'cancelled' ? 'danger' : 'info')); ?>">
+                                                    <?php echo ucfirst($order['status']); ?>
+                                                </span>
                                             </td>
                                             <td><?php echo date('M d, Y', strtotime($order['created_at'])); ?></td>
                                             <td>

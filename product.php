@@ -2,6 +2,8 @@
 require_once 'includes/session_check.php';
 require_once 'config/database.php';
 require_once 'includes/auth_check.php';
+require_once 'includes/reviews_handler.php';
+require_once 'includes/wishlist_handler.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -11,6 +13,7 @@ if (session_status() === PHP_SESSION_NONE) {
 if (isset($_POST['add_to_cart'])) {
     $product_id = (int)$_GET['id'];
     $quantity = max(1, (int)$_POST['quantity']);
+    $user_id = $_SESSION['user_id']; // Make sure user is logged in
     
     // Check stock availability
     $stmt = $pdo->prepare("SELECT stock FROM products WHERE id = ?");
@@ -36,68 +39,155 @@ if (isset($_POST['add_to_cart'])) {
         exit;
     }
     
-    if (!isset($_SESSION['cart'])) {
-        $_SESSION['cart'] = [];
-    }
+    // Check if item already exists in cart
+    $stmt = $pdo->prepare("SELECT quantity FROM cart WHERE user_id = ? AND product_id = ?");
+    $stmt->execute([$user_id, $product_id]);
+    $existing_quantity = $stmt->fetchColumn();
     
     // Check if adding this quantity would exceed available stock
-    $cart_quantity = isset($_SESSION['cart'][$product_id]) ? $_SESSION['cart'][$product_id] : 0;
-    if (($cart_quantity + $quantity) > $product_stock) {
+    if ($existing_quantity && ($existing_quantity + $quantity) > $product_stock) {
         header('Content-Type: application/json');
         echo json_encode([
             'success' => false,
-            'message' => 'Cannot add more items. Only ' . ($product_stock - $cart_quantity) . ' more items available.'
+            'message' => 'Cannot add more items. Only ' . ($product_stock - $existing_quantity) . ' more items available.'
         ]);
         exit;
     }
     
-    // If we get here, we can safely add to cart
-    if (isset($_SESSION['cart'][$product_id])) {
-        $_SESSION['cart'][$product_id] += $quantity;
-    } else {
-        $_SESSION['cart'][$product_id] = $quantity;
-    }
-    
-    // Get updated cart content
-    $cart_items = [];
-    $cart_total = 0;
-    
-    if (!empty($_SESSION['cart'])) {
-        $product_ids = array_keys($_SESSION['cart']);
-        $placeholders = str_repeat('?,', count($product_ids) - 1) . '?';
-        $stmt = $pdo->prepare("SELECT * FROM products WHERE id IN ($placeholders)");
-        $stmt->execute($product_ids);
+    try {
+        $pdo->beginTransaction();
+        
+        if ($existing_quantity) {
+            // Update existing cart item
+            $stmt = $pdo->prepare("UPDATE cart SET quantity = quantity + ? WHERE user_id = ? AND product_id = ?");
+            $stmt->execute([$quantity, $user_id, $product_id]);
+        } else {
+            // Insert new cart item
+            $stmt = $pdo->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)");
+            $stmt->execute([$user_id, $product_id, $quantity]);
+        }
+        
+        // Get updated cart content
+        $cart_items = [];
+        $cart_total = 0;
+        
+        $stmt = $pdo->prepare("
+            SELECT c.*, p.name, p.price 
+            FROM cart c 
+            JOIN products p ON c.product_id = p.id 
+            WHERE c.user_id = ?
+        ");
+        $stmt->execute([$user_id]);
         $cart_products = $stmt->fetchAll();
         
         foreach ($cart_products as $cart_product) {
-            $quantity = $_SESSION['cart'][$cart_product['id']];
-            $subtotal = $cart_product['price'] * $quantity;
+            $subtotal = $cart_product['price'] * $cart_product['quantity'];
             $cart_total += $subtotal;
             $cart_items[] = [
+                'id' => $cart_product['product_id'],
                 'name' => $cart_product['name'],
-                'quantity' => $quantity,
+                'quantity' => $cart_product['quantity'],
                 'price' => $cart_product['price'],
                 'subtotal' => $subtotal
             ];
         }
+        
+        $pdo->commit();
+        
+        // Return JSON response
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => true,
+            'message' => 'Product added to cart successfully',
+            'cart_items' => $cart_items,
+            'cart_total' => $cart_total
+        ]);
+        exit;
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Add to cart failed: " . $e->getMessage());
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'message' => 'Failed to add to cart: ' . $e->getMessage()
+        ]);
+        exit;
     }
+}
+
+// Handle remove from cart
+if (isset($_POST['remove_from_cart'])) {
+    $product_id = (int)$_POST['product_id'];
+    $user_id = $_SESSION['user_id'];
     
-    // Return JSON response
-    header('Content-Type: application/json');
-    echo json_encode([
-        'success' => true,
-        'message' => 'Product added to cart successfully',
-        'cart_items' => $cart_items,
-        'cart_total' => $cart_total
-    ]);
-    exit;
+    try {
+        $stmt = $pdo->prepare("DELETE FROM cart WHERE user_id = ? AND product_id = ?");
+        $stmt->execute([$user_id, $product_id]);
+        
+        // Get updated cart content
+        $cart_items = [];
+        $cart_total = 0;
+        
+        $stmt = $pdo->prepare("
+            SELECT c.*, p.name, p.price 
+            FROM cart c 
+            JOIN products p ON c.product_id = p.id 
+            WHERE c.user_id = ?
+        ");
+        $stmt->execute([$user_id]);
+        $cart_products = $stmt->fetchAll();
+        
+        foreach ($cart_products as $cart_product) {
+            $subtotal = $cart_product['price'] * $cart_product['quantity'];
+            $cart_total += $subtotal;
+            $cart_items[] = [
+                'id' => $cart_product['product_id'],
+                'name' => $cart_product['name'],
+                'quantity' => $cart_product['quantity'],
+                'price' => $cart_product['price'],
+                'subtotal' => $subtotal
+            ];
+        }
+        
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => true,
+            'message' => 'Item removed from cart successfully',
+            'cart_items' => $cart_items,
+            'cart_total' => $cart_total
+        ]);
+        exit;
+    } catch (Exception $e) {
+        error_log("Remove from cart failed: " . $e->getMessage());
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'message' => 'Failed to remove from cart: ' . $e->getMessage()
+        ]);
+        exit;
+    }
 }
 
 if (isset($_POST['order_now'])) {
     $product_id = (int)$_GET['id'];
     $quantity = max(1, (int)$_POST['quantity']);
-    if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
-    $_SESSION['cart'][$product_id] = $quantity;
+    $user_id = $_SESSION['user_id'];
+
+    // Check if item already exists in cart
+    $stmt = $pdo->prepare("SELECT quantity FROM cart WHERE user_id = ? AND product_id = ?");
+    $stmt->execute([$user_id, $product_id]);
+    $existing_quantity = $stmt->fetchColumn();
+
+    if ($existing_quantity) {
+        // Update existing cart item with the new quantity (replace, not add)
+        $stmt = $pdo->prepare("UPDATE cart SET quantity = ? WHERE user_id = ? AND product_id = ?");
+        $stmt->execute([$quantity, $user_id, $product_id]);
+    } else {
+        // Insert new cart item
+        $stmt = $pdo->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)");
+        $stmt->execute([$user_id, $product_id, $quantity]);
+    }
+    
     header('Location: checkout.php');
     exit();
 }
@@ -117,74 +207,11 @@ if (!$product) {
     exit;
 }
 
-// Get recommended products (same category or popular products)
-$stmt = $pdo->prepare("
-    SELECT * FROM products 
-    WHERE id != :product_id 
-    AND stock > 0 
-    AND (category = :category OR category IS NOT NULL)
-    ORDER BY RAND() 
-    LIMIT 4
-");
-$stmt->bindValue(':product_id', $product_id, PDO::PARAM_INT);
-$stmt->bindValue(':category', $product['category'], PDO::PARAM_STR);
-$stmt->execute();
-$recommended_products = $stmt->fetchAll();
-
-// If we don't have enough products in the same category, get some popular ones
-if (count($recommended_products) < 4) {
-    $needed = 4 - count($recommended_products);
-    $exclude_ids = array_column($recommended_products, 'id');
-    $exclude_ids[] = $product_id;
-    
-    if (!empty($exclude_ids)) {
-        $placeholders = str_repeat('?,', count($exclude_ids) - 1) . '?';
-        $sql = "
-            SELECT * FROM products 
-            WHERE id NOT IN ($placeholders)
-            AND stock > 0 
-            ORDER BY RAND() 
-            LIMIT $needed
-        ";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($exclude_ids);
-    } else {
-        $sql = "
-            SELECT * FROM products 
-            WHERE stock > 0 
-            ORDER BY RAND() 
-            LIMIT $needed
-        ";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute();
-    }
-    
-    $additional_products = $stmt->fetchAll();
-    $recommended_products = array_merge($recommended_products, $additional_products);
-}
-
-// Get current cart items for display
-$current_cart_items = [];
-$current_cart_total = 0;
-if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
-    $cart_product_ids = array_keys($_SESSION['cart']);
-    $cart_placeholders = str_repeat('?,', count($cart_product_ids) - 1) . '?';
-    $cart_stmt = $pdo->prepare("SELECT * FROM products WHERE id IN ($cart_placeholders)");
-    $cart_stmt->execute($cart_product_ids);
-    $cart_products = $cart_stmt->fetchAll();
-    
-    foreach ($cart_products as $cart_product) {
-        $cart_quantity = $_SESSION['cart'][$cart_product['id']];
-        $subtotal = $cart_product['price'] * $cart_quantity;
-        $current_cart_total += $subtotal;
-        $current_cart_items[] = [
-            'name' => $cart_product['name'],
-            'quantity' => $cart_quantity,
-            'price' => $cart_product['price'],
-            'subtotal' => $subtotal
-        ];
-    }
-}
+// Get product rating and reviews
+$product_rating = getProductRating($product_id);
+$reviews = getProductReviews($product_id);
+$user_review = getUserReview($_SESSION['user_id'], $product_id);
+$is_in_wishlist = isInWishlist($_SESSION['user_id'], $product_id);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -194,6 +221,8 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
     <title><?php echo htmlspecialchars($product['name']); ?> - Product Details</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- Add SweetAlert2 CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.min.css">
     <style>
         html, body {
             height: 100%;
@@ -211,6 +240,34 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
             flex-shrink: 0;
             margin-top: auto;
         }
+        .rating {
+            display: flex;
+            flex-direction: row-reverse;
+            justify-content: flex-end;
+        }
+        .rating input {
+            display: none;
+        }
+        .rating label {
+            cursor: pointer;
+            font-size: 1.5em;
+            color: #ddd;
+            padding: 0 0.1em;
+        }
+        .rating input:checked ~ label,
+        .rating label:hover,
+        .rating label:hover ~ label {
+            color: #ffd700;
+        }
+        .product-image img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stars {
+            color: #ffd700;
+        }
     </style>
 </head>
 <body>
@@ -218,6 +275,11 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
 
 <div class="main-content">
     <div class="container py-5">
+        <div class="mb-4">
+            <a href="javascript:history.back()" class="btn btn-outline-secondary btn-sm">
+                <i class="fas fa-arrow-left me-2"></i> Back
+            </a>
+        </div>
         <div class="row">
             <div class="col-md-6 d-flex flex-column align-items-center">
                 <div class="bg-light rounded p-3 mb-3 shadow-sm" style="width:100%;max-width:400px;min-height:350px;display:flex;align-items:center;justify-content:center;">
@@ -234,16 +296,17 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
                 </div>
             </div>
             <div class="col-md-6">
-                <h2 style="font-size:2.5rem;font-weight:700;"><?php echo htmlspecialchars($product['name']); ?></h2>
-                <div class="mb-2" style="color:#b0b0b0;font-size:1.5rem;font-weight:600;">₱ <?php echo number_format($product['price'], 2); ?></div>
+                <div class="product-details-content">
+                <h2 style="font-size:2.5rem;font-weight:700;margin-bottom: 0.5rem;"><?php echo htmlspecialchars($product['name']); ?></h2>
+                <div class="mb-3" style="color:#b0b0b0;font-size:1.5rem;font-weight:600;">₱ <?php echo number_format($product['price'], 2); ?></div>
                 <div class="mb-3">
                     <span class="text-warning">&#9733; &#9733; &#9733; &#9733; &#189;</span>
                     <span style="color:#b0b0b0;">5 Customer Review</span>
                 </div>
-                <div class="mb-3" style="max-width:500px;">
+                <div class="mb-4" style="max-width:500px;">
                     <?php echo nl2br(htmlspecialchars($product['description'])); ?>
                 </div>
-                <div class="mb-3">
+                <div class="mb-4">
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <i class="fas fa-box" style="color: var(--primary-color);"></i>
                         <span style="font-weight: 600;">Stock Available:</span>
@@ -257,13 +320,13 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
                     </div>
                     <?php endif; ?>
                 </div>
-                <div class="mb-3">
-                    <div class="mb-1">Quantity</div>
+                <div class="mb-4">
+                    <div class="mb-2">Quantity</div>
                     <div class="d-flex align-items-center gap-3">
                         <div class="input-group" style="width:110px;">
-                            <button class="btn btn-outline-secondary" type="button" onclick="decrementQuantity()">-</button>
+                            <button class="btn btn-outline-secondary" type="button" id="decrementBtn">-</button>
                             <input type="text" id="quantity" class="form-control text-center" value="1" style="max-width:40px;" readonly>
-                            <button class="btn btn-outline-secondary" type="button" onclick="incrementQuantity()">+</button>
+                            <button class="btn btn-outline-secondary" type="button" id="incrementBtn">+</button>
                         </div>
                         <span class="text-muted">pieces</span>
                     </div>
@@ -276,38 +339,70 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
                         <button type="submit" class="btn btn-dark px-4" style="font-size:1.1rem;">Order Now</button>
                     </form>
                 </div>
+                </div> <!-- End product-details-content -->
             </div>
         </div>
     </div>
     
-    <!-- Recommended Products Section -->
-    <div class="container mb-5">
-        <h3 class="mb-4" style="font-weight: 600;">You May Also Like</h3>
-        <div class="row g-4">
-            <?php foreach ($recommended_products as $recommended): ?>
-            <div class="col-6 col-md-3">
-                <a href="product.php?id=<?php echo $recommended['id']; ?>" class="text-decoration-none">
-                    <div class="card h-100 border-0 shadow-sm" style="transition: transform 0.2s;">
-                        <div class="position-relative" style="height: 200px; overflow: hidden;">
-                            <?php if (!empty($recommended['image']) && $recommended['image'] !== 'default.png'): ?>
-                            <img src="assets/images/products/<?php echo htmlspecialchars($recommended['image']); ?>" 
-                                 alt="<?php echo htmlspecialchars($recommended['name']); ?>"
-                                 class="card-img-top h-100 w-100"
-                                 style="object-fit: cover;">
-                            <?php else: ?>
-                            <div class="d-flex align-items-center justify-content-center h-100 bg-light">
-                                <i class="fas fa-image fa-3x text-muted"></i>
-                            </div>
-                            <?php endif; ?>
-                        </div>
+    <!-- Reviews Section -->
+    <div class="container mt-5">
+        <div class="row">
+            <div class="col-12">
+                <div class="reviews-section">
+                <h3>Customer Reviews</h3>
+                
+                <?php if (!$user_review): ?>
+                    <div class="card mb-4">
                         <div class="card-body">
-                            <h5 class="card-title text-dark mb-2" style="font-size: 1rem;"><?php echo htmlspecialchars($recommended['name']); ?></h5>
-                            <p class="card-text text-primary mb-0" style="font-weight: 600;">₱<?php echo number_format($recommended['price'], 2); ?></p>
+                            <h5>Write a Review</h5>
+                            <form method="POST">
+                                <div class="form-group">
+                                    <label>Rating</label>
+                                    <div class="rating">
+                                        <?php for ($i = 5; $i >= 1; $i--): ?>
+                                            <input type="radio" name="rating" value="<?php echo $i; ?>" id="star<?php echo $i; ?>" required>
+                                            <label for="star<?php echo $i; ?>"><i class="fas fa-star"></i></label>
+                                        <?php endfor; ?>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="review_text">Your Review</label>
+                                    <textarea name="review_text" id="review_text" class="form-control" rows="3" required></textarea>
+                                </div>
+                                <button type="submit" name="submit_review" class="btn btn-primary">Submit Review</button>
+                            </form>
                         </div>
                     </div>
-                </a>
+                <?php endif; ?>
+                
+                <?php if (empty($reviews)): ?>
+                    <div class="text-center py-4">
+                        <p class="text-muted">No reviews yet. Be the first to review this product!</p>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($reviews as $review): ?>
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div>
+                                        <h5 class="mb-0"><?php echo htmlspecialchars($review['reviewer_name']); ?></h5>
+                                        <small class="text-muted">
+                                            <?php echo date('F j, Y', strtotime($review['created_at'])); ?>
+                                        </small>
+                                    </div>
+                                    <div class="stars">
+                                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                                            <i class="fas fa-star <?php echo $i <= $review['rating'] ? 'text-warning' : 'text-muted'; ?>"></i>
+                                        <?php endfor; ?>
+                                    </div>
+                                </div>
+                                <p class="mb-0"><?php echo nl2br(htmlspecialchars($review['review_text'])); ?></p>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </div> <!-- End reviews-section -->
             </div>
-            <?php endforeach; ?>
         </div>
     </div>
 </div>
@@ -370,181 +465,276 @@ if (isset($_SESSION['cart']) && !empty($_SESSION['cart'])) {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Add SweetAlert2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.7.32/dist/sweetalert2.all.min.js"></script>
 <script>
-document.getElementById('addToCartBtn').addEventListener('click', function(e) {
-    e.preventDefault();
-    
-    // Check if product is out of stock
-    const stock = <?php echo $product['stock']; ?>;
-    if (stock <= 0) {
-        alert('Sorry, this item is out of stock');
-        return;
-    }
-    
-    const quantity = parseInt(document.getElementById('quantity').value);
-    if (quantity > stock) {
-        alert('Not enough stock available. Only ' + stock + ' items left.');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('add_to_cart', '1');
-    formData.append('quantity', quantity);
-    
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Network response was not ok');
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            // Build cart HTML
-            let cartHtml = '<div class="table-responsive"><table class="table">';
-            cartHtml += '<thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Total</th><th>Action</th></tr></thead><tbody>';
-            
-            data.cart_items.forEach(item => {
-                cartHtml += `<tr>
-                    <td>${item.name}</td>
-                    <td>${item.quantity}</td>
-                    <td>₱${parseFloat(item.price).toFixed(2)}</td>
-                    <td>₱${parseFloat(item.subtotal).toFixed(2)}</td>
-                    <td>
-                        <button class="btn btn-sm btn-danger" onclick="removeFromCart(${item.id})">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>`;
+// Wrap the script in a DOMContentLoaded listener
+document.addEventListener('DOMContentLoaded', function() {
+
+    document.getElementById('addToCartBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        
+        // Check if product is out of stock
+        const stock = <?php echo $product['stock']; ?>;
+        if (stock <= 0) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Out of Stock',
+                text: 'Sorry, this item is out of stock',
+                confirmButtonColor: '#dc3545'
             });
-            
-            cartHtml += '</tbody></table></div>';
-            cartHtml += '<div class="d-flex justify-content-between align-items-center mt-3">';
-            cartHtml += `<div class="h5 mb-0">Total: ₱${parseFloat(data.cart_total).toFixed(2)}</div>`;
-            cartHtml += '<a href="checkout.php" class="btn btn-primary">Proceed to Checkout</a>';
-            cartHtml += '</div>';
-            
-            // Update cart modal and show it
-            document.getElementById('cartModalBody').innerHTML = cartHtml;
-            const cartModal = new bootstrap.Modal(document.getElementById('cartModal'));
-            cartModal.show();
-        } else {
-            alert(data.message || 'Failed to add to cart');
+            return;
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Failed to add to cart. Please try again.');
-    });
-});
+        
+        const quantity = parseInt(document.getElementById('quantity').value);
+        if (quantity > stock) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Stock Limit',
+                text: 'Not enough stock available. Only ' + stock + ' items left.',
+                confirmButtonColor: '#ffc107'
+            });
+            return;
+        }
 
-// Function to remove item from cart
-function removeFromCart(productId) {
-    const formData = new FormData();
-    formData.append('remove_from_cart', '1');
-    formData.append('product_id', productId);
-    
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Update cart display
-            if (data.cart_items.length === 0) {
-                document.getElementById('cartModalBody').innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-shopping-cart fa-3x text-muted mb-3"></i>
-                        <p class="text-muted mb-0">Your cart is empty</p>
-                    </div>
-                `;
-            } else {
-                let cartHtml = '<div class="table-responsive"><table class="table">';
-                cartHtml += '<thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Total</th><th>Action</th></tr></thead><tbody>';
+        // Add confirmation dialog using SweetAlert2
+        Swal.fire({
+            title: 'Add to Cart?',
+            html: `Are you sure you want to add <b>${quantity}</b> item(s) to your cart?`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#28a745',
+            cancelButtonColor: '#dc3545',
+            confirmButtonText: 'Yes, add to cart',
+            cancelButtonText: 'No, cancel'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                const formData = new FormData();
+                formData.append('add_to_cart', '1');
+                formData.append('quantity', quantity);
                 
-                data.cart_items.forEach(item => {
-                    cartHtml += `<tr>
-                        <td>${item.name}</td>
-                        <td>${item.quantity}</td>
-                        <td>₱${parseFloat(item.price).toFixed(2)}</td>
-                        <td>₱${parseFloat(item.subtotal).toFixed(2)}</td>
-                        <td>
-                            <button class="btn btn-sm btn-danger" onclick="removeFromCart(${item.id})">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>`;
+                fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        // Build cart HTML
+                        let cartHtml = '<div class="table-responsive"><table class="table">';
+                        cartHtml += '<thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Total</th><th>Action</th></tr></thead><tbody>';
+                        
+                        data.cart_items.forEach(item => {
+                            cartHtml += `<tr>
+                                <td>${item.name}</td>
+                                <td>${item.quantity}</td>
+                                <td>₱${parseFloat(item.price).toFixed(2)}</td>
+                                <td>₱${parseFloat(item.subtotal).toFixed(2)}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-danger" onclick="removeFromCart(${item.id})">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>`;
+                        });
+                        
+                        cartHtml += '</tbody></table></div>';
+                        cartHtml += '<div class="d-flex justify-content-between align-items-center mt-3">';
+                        cartHtml += `<div class="h5 mb-0">Total: ₱${parseFloat(data.cart_total).toFixed(2)}</div>`;
+                        cartHtml += '<a href="checkout.php" class="btn btn-primary">Proceed to Checkout</a>';
+                        cartHtml += '</div>';
+                        
+                        // Update cart modal and show it
+                        document.getElementById('cartModalBody').innerHTML = cartHtml;
+                        const cartModal = new bootstrap.Modal(document.getElementById('cartModal'));
+                        cartModal.show();
+
+                        // Show success message
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Added to Cart!',
+                            text: 'Product has been added to your cart successfully',
+                            confirmButtonColor: '#28a745'
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: data.message || 'Failed to add to cart',
+                            confirmButtonColor: '#dc3545'
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Failed to add to cart. Please try again.',
+                        confirmButtonColor: '#dc3545'
+                    });
                 });
-                
-                cartHtml += '</tbody></table></div>';
-                cartHtml += '<div class="d-flex justify-content-between align-items-center mt-3">';
-                cartHtml += `<div class="h5 mb-0">Total: ₱${parseFloat(data.cart_total).toFixed(2)}</div>`;
-                cartHtml += '<a href="checkout.php" class="btn btn-primary">Proceed to Checkout</a>';
-                cartHtml += '</div>';
-                
-                document.getElementById('cartModalBody').innerHTML = cartHtml;
             }
-        } else {
-            alert(data.message || 'Failed to remove item from cart');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Failed to remove item from cart. Please try again.');
+        });
     });
-}
 
-// Function to close cart modal
-function closeCartModal() {
-    const cartModal = bootstrap.Modal.getInstance(document.getElementById('cartModal'));
-    if (cartModal) {
-        cartModal.hide();
+    // Update removeFromCart function to use SweetAlert2
+    function removeFromCart(productId) {
+        Swal.fire({
+            title: 'Remove Item?',
+            text: 'Are you sure you want to remove this item from your cart?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Yes, remove it',
+            cancelButtonText: 'No, keep it'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                const formData = new FormData();
+                formData.append('remove_from_cart', '1');
+                formData.append('product_id', productId);
+                
+                fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update cart display
+                        if (data.cart_items.length === 0) {
+                            document.getElementById('cartModalBody').innerHTML = `
+                                <div class="text-center py-4">
+                                    <i class="fas fa-shopping-cart fa-3x text-muted mb-3"></i>
+                                    <p class="text-muted mb-0">Your cart is empty</p>
+                                </div>
+                            `;
+                        } else {
+                            let cartHtml = '<div class="table-responsive"><table class="table">';
+                            cartHtml += '<thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Total</th><th>Action</th></tr></thead><tbody>';
+                            
+                            data.cart_items.forEach(item => {
+                                cartHtml += `<tr>
+                                    <td>${item.name}</td>
+                                    <td>${item.quantity}</td>
+                                    <td>₱${parseFloat(item.price).toFixed(2)}</td>
+                                    <td>₱${parseFloat(item.subtotal).toFixed(2)}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-danger" onclick="removeFromCart(${item.id})">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>`;
+                            });
+                            
+                            cartHtml += '</tbody></table></div>';
+                            cartHtml += '<div class="d-flex justify-content-between align-items-center mt-3">';
+                            cartHtml += `<div class="h5 mb-0">Total: ₱${parseFloat(data.cart_total).toFixed(2)}</div>`;
+                            cartHtml += '<a href="checkout.php" class="btn btn-primary">Proceed to Checkout</a>';
+                            cartHtml += '</div>';
+                            
+                            document.getElementById('cartModalBody').innerHTML = cartHtml;
+                        }
+
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Removed!',
+                            text: 'Item has been removed from your cart',
+                            confirmButtonColor: '#28a745'
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: data.message || 'Failed to remove item from cart',
+                            confirmButtonColor: '#dc3545'
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Failed to remove item from cart. Please try again.',
+                        confirmButtonColor: '#dc3545'
+                    });
+                });
+            }
+        });
     }
-}
 
-// Also update the increment function to check stock
-function incrementQuantity() {
-    const input = document.getElementById('quantity');
-    const orderInput = document.getElementById('order_quantity');
-    const currentQuantity = parseInt(input.value);
+    // Function to close cart modal
+    function closeCartModal() {
+        const cartModalElement = document.getElementById('cartModal');
+        const cartModal = new bootstrap.Modal(cartModalElement);
+        if (cartModal) {
+            cartModal.hide();
+        }
+    }
+
+    // Add event listener for cart modal close button
+    document.querySelector('#cartModal .btn-close').addEventListener('click', function() {
+        closeCartModal();
+    });
+
+    document.getElementById('cartIcon').addEventListener('click', function(e) {
+        e.preventDefault();
+        const cartModalElement = document.getElementById('cartModal');
+        const cartModal = new bootstrap.Modal(cartModalElement);
+        cartModal.show();
+    });
+}); // End DOMContentLoaded listener
+
+// Add event listeners for quantity buttons outside the DOMContentLoaded listener
+document.addEventListener('DOMContentLoaded', function() {
+    const quantityInput = document.getElementById('quantity');
+    const orderQuantityInput = document.getElementById('order_quantity');
+    const incrementBtn = document.getElementById('incrementBtn');
+    const decrementBtn = document.getElementById('decrementBtn');
     const maxStock = <?php echo $product['stock']; ?>;
-    
-    if (maxStock <= 0) {
-        alert('Sorry, this item is out of stock');
-        return;
-    }
-    
-    if (currentQuantity < maxStock) {
-        input.value = currentQuantity + 1;
-        orderInput.value = input.value;
-    } else {
-        alert('Maximum available stock reached (' + maxStock + ' items)');
-    }
-}
 
-function decrementQuantity() {
-    const input = document.getElementById('quantity');
-    const orderInput = document.getElementById('order_quantity');
-    if (parseInt(input.value) > 1) {
-        input.value = parseInt(input.value) - 1;
-        orderInput.value = input.value;
-    }
-}
+    incrementBtn.addEventListener('click', function() {
+        let currentQuantity = parseInt(quantityInput.value);
+        
+        if (maxStock <= 0) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Out of Stock',
+                text: 'Sorry, this item is out of stock',
+                confirmButtonColor: '#dc3545'
+            });
+            return;
+        }
 
-// Add event listener for cart modal close button
-document.querySelector('#cartModal .btn-close').addEventListener('click', function() {
-    closeCartModal();
+        if (currentQuantity < maxStock) {
+            quantityInput.value = currentQuantity + 1;
+            orderQuantityInput.value = quantityInput.value;
+        } else {
+             Swal.fire({
+                icon: 'warning',
+                title: 'Stock Limit',
+                text: 'Maximum available stock reached (' + maxStock + ' items)',
+                confirmButtonColor: '#ffc107'
+            });
+        }
+    });
+
+    decrementBtn.addEventListener('click', function() {
+        let currentQuantity = parseInt(quantityInput.value);
+        if (currentQuantity > 1) {
+            quantityInput.value = currentQuantity - 1;
+            orderQuantityInput.value = quantityInput.value;
+        }
+    });
 });
 
-document.getElementById('cartIcon').addEventListener('click', function(e) {
-    e.preventDefault();
-    const cartModal = new bootstrap.Modal(document.getElementById('cartModal'));
-    cartModal.show();
-});
 </script>
 
 <div class="footer">
