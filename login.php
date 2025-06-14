@@ -4,6 +4,7 @@ require_once 'config/database.php';
 
 // Handle potential success message from previous actions (like registration)
 $register_success_message = null;
+
 if (isset($_SESSION['register_success'])) {
     $register_success_message = $_SESSION['register_success'];
     unset($_SESSION['register_success']);
